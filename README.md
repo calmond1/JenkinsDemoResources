@@ -5,4 +5,5 @@
 - Put your default values for the pipeline parameters
 
 ## Demo Video with explanation:
-[![Video Title](https://img.youtube.com/vi/VIDEO_ID/0.jpg)]([https://youtu.be/HCJ66wICC9E])(https://youtu.be/HCJ66wICC9E)
+[![Watch the video](https://img.youtube.com/vi/HCJ66wICC9E/0.jpg)](https://www.youtube.com/watch?v=HCJ66wICC9E)
+
