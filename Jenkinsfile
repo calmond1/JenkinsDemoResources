@@ -63,7 +63,7 @@ pipeline {
         //stage('Cleanup Old Images') {
         //    steps {
         //        // You can move the Cleanup Old Images into a different pipeline and trigger it from here instead
-        //        build job: 'MobileAPICleanup', wait: false
+        //        build job: 'YourJenkinsCleanupProjectName', wait: false
         //    }
         //}
         stage('Cleanup Old Images') {
