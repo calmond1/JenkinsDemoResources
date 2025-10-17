@@ -12,9 +12,17 @@ pipeline {
     }
 
     stages {
-        stage('Determine Next Image Tag') {
+        stage('Checkout Source') {
             steps {
-                script {
+                git branch: "${params.GIT_BRANCH}", 
+                url: "${params.GIT_REPO}",
+                credentialsId: "${params.CREDENTIALS}"
+            }
+        }
+
+        stage('Determine Next Image Tag and Build Image') {
+            steps {
+				script {
                     // Get the highest numeric tag, if any
                     def lastTag = sh(
                         script: 'docker image ls --format "{{.Tag}}" ${IMAGE_BASE} | grep -E "^[0-9]+$" | sort -n | tail -1',
@@ -30,19 +38,6 @@ pipeline {
 
                     echo "Using image tag: ${env.IMAGE_TAG}"
                 }
-            }
-        }
-
-        stage('Checkout Source') {
-            steps {
-                git branch: "${params.GIT_BRANCH}", 
-                url: "${params.GIT_REPO}",
-                credentialsId: "${params.CREDENTIALS}"
-            }
-        }
-
-        stage('Build Image') {
-            steps {
                 sh "docker build -t ${env.IMAGE_TAG} -f ./Dockerfile ."
             }
         }
