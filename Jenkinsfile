@@ -70,12 +70,12 @@ pipeline {
             steps {
                 script {
                     // Keep last 3 numeric tags, delete the rest
+                    sh """
+					    docker image ls --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" | grep '^${env.IMAGE_BASE}*.[0-9]' \
+					    | sort -k2 -r | tail -n +4 | awk '{print \$1}' | xargs -r docker rmi
+					"""
                     sh '''
-                        docker image ls --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" | grep '^${IMAGE_BASE}*.[0-9]' \
-                        | sort -k2 -r | tail -n +4 | awk '{print $1}' | xargs -r docker rmi
-                    '''
-                    sh '''
-                       docker image ls --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" | grep '^${IMAGE_BASE}*.test' \
+                       docker image ls --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" | grep '^${env.IMAGE_BASE}*.test' \
                         | awk '{print $1}' | xargs -r docker rmi
                     '''
                     sh 'docker image prune -f'
