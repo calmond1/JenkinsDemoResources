@@ -1,7 +1,7 @@
 pipeline {
     agent any
 
-    // Global environment (IMAGE_TAG is computed in the pipeline)
+    // Global environment (computed in the pipeline)
     environment {
         IMAGE_TAG = ""
         TEST_IMAGE_TAG = ""
@@ -28,7 +28,6 @@ pipeline {
         stage('Determine Next Image Tag and Build Image') {
             steps {
                 script {
-                    // Get the highest numeric tag for this IMAGE_BASE (if any)
                     def lastTag = sh(
                         script: "docker image ls --format \"{{.Tag}}\" ${params.IMAGE_BASE} | grep -E \"^[0-9]+$\" | sort -n | tail -1",
                         returnStdout: true
@@ -44,7 +43,6 @@ pipeline {
                     echo "Using image tag: ${env.IMAGE_TAG}"
                 }
 
-                // Build the main application image
                 sh "docker build -t ${env.IMAGE_TAG} -f ./Dockerfile ."
             }
         }
@@ -52,38 +50,30 @@ pipeline {
         stage('Run Unit Tests') {
             steps {
                 script {
-                    // Stable tag for the test image
                     env.TEST_IMAGE_TAG = "${params.IMAGE_BASE}.test"
                 }
-        
+
                 sh """
-                  # Build the test image
                   docker build -t ${env.TEST_IMAGE_TAG} -f ./Dockerfile.test .
-        
-                  # Clean and recreate TestResults directory in the workspace
+
                   rm -rf TestResults
                   mkdir -p TestResults
-        
-                  # Run tests in the container, writing JUnit XML into the mounted TestResults directory
-                  docker run --rm \
-                    -v $PWD/TestResults:/src/TestResults \
+
+                  docker run --rm \\
+                    -v \$PWD/TestResults:/src/TestResults \\
                     ${env.TEST_IMAGE_TAG}
                 """
-        
-                // Publish JUnit test report so Jenkins shows a "Tests" tab/button
+
                 junit 'TestResults/*.xml'
             }
         }
 
         stage('SonarQube Analysis') {
             steps {
-                // Name must match the SonarQube server configuration in Jenkins
                 withSonarQubeEnv('My SonarQube') {
                     sh """
-                        # Build sonar scan image using Dockerfile.sonar
                         docker build -t ${params.IMAGE_BASE}.sonarscan -f Dockerfile.sonar .
 
-                        # Run sonar analysis inside the container
                         docker run --rm \\
                             -e SONAR_HOST_URL=${SONAR_HOST_URL} \\
                             -e SONAR_PROJECT_KEY=${params.SONAR_PROJECT_KEY} \\
@@ -94,7 +84,9 @@ pipeline {
             }
         }
 
+        // Only enforce Quality Gate for main branch
         stage('Quality Gate') {
+            when { branch 'main' }  // Feature branches still run analysis, but don't enforce gates
             steps {
                 timeout(time: 10, unit: 'MINUTES') {
                     script {
@@ -108,9 +100,10 @@ pipeline {
             }
         }
 
+        // Only deploy when building from main branch
         stage('Deploy Stack') {
+            when { branch 'main' }  // Prevents deployment from feature/test branches
             steps {
-                // Bring down any existing stack and start with the new IMAGE_TAG
                 sh 'docker compose down || true'
                 sh "IMAGE_TAG=${env.IMAGE_TAG} docker compose up -d"
             }
@@ -119,28 +112,24 @@ pipeline {
         stage('Cleanup Old Images') {
             steps {
                 script {
-                    // Keep last 3 numeric tags for IMAGE_BASE, remove older ones
                     sh """
-                        docker image ls --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" \
-                        | grep '^${params.IMAGE_BASE}:[0-9]' \
-                        | sort -k2 -r \
-                        | tail -n +4 \
-                        | awk '{print \$1}' \
+                        docker image ls --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" \\
+                        | grep '^${params.IMAGE_BASE}:[0-9]' \\
+                        | sort -k2 -r \\
+                        | tail -n +4 \\
+                        | awk '{print \$1}' \\
                         | xargs -r docker rmi
                     """
-        
-                    // Remove all test images for this IMAGE_BASE
+
                     sh """
-                        docker image ls --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" \
-                        | grep '^${params.IMAGE_BASE}\\.test' \
-                        | awk '{print \$1}' \
+                        docker image ls --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" \\
+                        | grep '^${params.IMAGE_BASE}\\.test' \\
+                        | awk '{print \$1}' \\
                         | xargs -r docker rmi
                     """
-        
-                    // Remove the sonar scan image (only one tag)
+
                     sh "docker rmi ${params.IMAGE_BASE}.sonarscan || true"
-        
-                    // Remove dangling images
+
                     sh 'docker image prune -f'
                 }
             }
