@@ -153,6 +153,47 @@ pipeline {
             }
         }
 
+        // This requires a one-time setup in GH:
+        // Go to your repo on GitHub → Settings → Pages
+        // Under Source:
+        //    Choose Branch: gh-pages
+        //    Choose Folder: / (root)
+        //    Save.
+        stage('Publish GitHub Pages') {
+            when { branch 'main' } // Only publish docs for main branch builds
+            steps {
+                // Use the same SSH credentials used for checkout
+                sshagent (credentials: [params.CREDENTIALS]) {
+                    sh """
+                      # Fresh clone of gh-pages branch into a separate folder
+                      rm -rf gh-pages
+        
+                      # Try to clone gh-pages; if it doesn't exist, create it as an orphan branch
+                      git clone --branch gh-pages --single-branch ${params.GIT_REPO} gh-pages || \
+                      (git clone ${params.GIT_REPO} gh-pages && cd gh-pages && git checkout --orphan gh-pages)
+        
+                      cd gh-pages
+        
+                      # Remove old contents
+                      rm -rf *
+        
+                      # Copy generated DocFX site into gh-pages root
+                      cp -R ../docs/_site/* .
+        
+                      # Ensure GitHub Pages doesn't try to run Jekyll
+                      touch .nojekyll
+        
+                      git add .
+        
+                      # Commit only if there are changes
+                      git commit -m "Update GitHub Pages docs from Jenkins build ${BUILD_NUMBER}" || echo "No changes to commit"
+        
+                      git push origin gh-pages
+                    """
+                }
+            }
+        }
+
         stage('Cleanup Old Images') {
             steps {
                 script {
