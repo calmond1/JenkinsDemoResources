@@ -28,6 +28,7 @@ pipeline {
         stage('Determine Next Image Tag and Build Image') {
             steps {
                 script {
+                    // Get the highest numeric tag for this IMAGE_BASE (if any)
                     def lastTag = sh(
                         script: "docker image ls --format \"{{.Tag}}\" ${params.IMAGE_BASE} | grep -E \"^[0-9]+$\" | sort -n | tail -1",
                         returnStdout: true
@@ -43,6 +44,7 @@ pipeline {
                     echo "Using image tag: ${env.IMAGE_TAG}"
                 }
 
+                // Build the main application image
                 sh "docker build -t ${env.IMAGE_TAG} -f ./Dockerfile ."
             }
         }
@@ -50,31 +52,38 @@ pipeline {
         stage('Run Unit Tests') {
             steps {
                 script {
+                    // Stable tag for the test image
                     env.TEST_IMAGE_TAG = "${params.IMAGE_BASE}.test"
                 }
 
                 sh """
+                  # Build the test image
                   docker build -t ${env.TEST_IMAGE_TAG} -f ./Dockerfile.test .
 
+                  # Clean and recreate TestResults directory in the workspace
                   rm -rf TestResults
                   mkdir -p TestResults
 
+                  # Run tests in the container, writing JUnit XML into the mounted TestResults directory
                   docker run --rm \\
                     -v \$PWD/TestResults:/src/TestResults \\
                     ${env.TEST_IMAGE_TAG}
                 """
-                
-                // Requires the junit plugin in Jenkins
+
+                // Publish JUnit test report so Jenkins shows a "Tests" tab/button
                 junit 'TestResults/*.xml'
             }
         }
 
         stage('SonarQube Analysis') {
             steps {
+                // Name must match the SonarQube server configuration in Jenkins
                 withSonarQubeEnv('My SonarQube') {
                     sh """
+                        # Build sonar scan image using Dockerfile.sonar
                         docker build -t ${params.IMAGE_BASE}.sonarscan -f Dockerfile.sonar .
 
+                        # Run sonar analysis inside the container
                         docker run --rm \\
                             -e SONAR_HOST_URL=${SONAR_HOST_URL} \\
                             -e SONAR_PROJECT_KEY=${params.SONAR_PROJECT_KEY} \\
@@ -110,9 +119,44 @@ pipeline {
             }
         }
 
+        stage('Build & Publish Docs') {
+            steps {
+                // Build API docs from XML comments using DocFX inside a .NET SDK container
+                sh """
+                  docker run --rm \\
+                    -v \$PWD:/work \\
+                    -w /work \\
+                    mcr.microsoft.com/dotnet/sdk:8.0 \\
+                    bash -c '
+                      # Build the project so XML docs are generated
+                      dotnet build MobileAPI/MobileAPI.csproj -c Release
+
+                      # Install DocFX as a dotnet global tool
+                      dotnet tool install -g docfx || true
+
+                      export PATH="\\\$PATH:/root/.dotnet/tools"
+
+                      # Generate documentation as defined in docfx.json
+                      docfx docfx.json
+                    '
+                """
+
+                // Publish generated HTML docs so Jenkins shows an "API Documentation" link
+                publishHTML(target: [
+                    reportName           : 'API Documentation',
+                    reportDir            : 'docs/_site',
+                    reportFiles          : 'index.html',
+                    keepAll              : true,
+                    alwaysLinkToLastBuild: true,
+                    allowMissing         : true
+                ])
+            }
+        }
+
         stage('Cleanup Old Images') {
             steps {
                 script {
+                    // Keep last 3 numeric tags for IMAGE_BASE, remove older ones
                     sh """
                         docker image ls --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" \\
                         | grep '^${params.IMAGE_BASE}:[0-9]' \\
@@ -122,6 +166,7 @@ pipeline {
                         | xargs -r docker rmi
                     """
 
+                    // Remove all test images for this IMAGE_BASE
                     sh """
                         docker image ls --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" \\
                         | grep '^${params.IMAGE_BASE}\\.test' \\
@@ -129,8 +174,10 @@ pipeline {
                         | xargs -r docker rmi
                     """
 
+                    // Remove the sonar scan image
                     sh "docker rmi ${params.IMAGE_BASE}.sonarscan || true"
 
+                    // Remove dangling images
                     sh 'docker image prune -f'
                 }
             }
@@ -142,7 +189,7 @@ pipeline {
             sh 'docker ps || true'
         }
         success {
-            echo "✅ Build, analysis, and deploy successful. New image tag: ${env.IMAGE_TAG}"
+            echo "✅ Build, analysis, docs, and deploy successful. New image tag: ${env.IMAGE_TAG}"
         }
         unstable {
             echo "⚠️ Build completed but marked UNSTABLE due to Quality Gate."
