@@ -105,22 +105,25 @@ pipeline {
                 script {
                     // Keep last 3 numeric tags for IMAGE_BASE, remove older ones
                     sh """
-                        docker image ls --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" \\
-                        | grep '^${params.IMAGE_BASE}:[0-9]' \\
-                        | sort -k2 -r \\
-                        | tail -n +4 \\
-                        | awk '{print \$1}' \\
+                        docker image ls --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" \
+                        | grep '^${params.IMAGE_BASE}:[0-9]' \
+                        | sort -k2 -r \
+                        | tail -n +4 \
+                        | awk '{print \$1}' \
                         | xargs -r docker rmi
                     """
-
+        
                     // Remove all test images for this IMAGE_BASE
                     sh """
-                        docker image ls --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" \\
-                        | grep '^${params.IMAGE_BASE}\\.test' \\
-                        | awk '{print \$1}' \\
+                        docker image ls --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" \
+                        | grep '^${params.IMAGE_BASE}\\.test' \
+                        | awk '{print \$1}' \
                         | xargs -r docker rmi
                     """
-
+        
+                    // Remove the sonar scan image (only one tag)
+                    sh "docker rmi ${params.IMAGE_BASE}.sonarscan || true"
+        
                     // Remove dangling images
                     sh 'docker image prune -f'
                 }
