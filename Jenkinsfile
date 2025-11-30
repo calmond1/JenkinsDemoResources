@@ -52,10 +52,26 @@ pipeline {
         stage('Run Unit Tests') {
             steps {
                 script {
-                    // Simple pattern for test image tag
+                    // Stable tag for the test image
                     env.TEST_IMAGE_TAG = "${params.IMAGE_BASE}.test"
                 }
-                sh "docker build -t ${env.TEST_IMAGE_TAG} -f ./Dockerfile.test ."
+        
+                sh """
+                  # Build the test image
+                  docker build -t ${env.TEST_IMAGE_TAG} -f ./Dockerfile.test .
+        
+                  # Clean and recreate TestResults directory in the workspace
+                  rm -rf TestResults
+                  mkdir -p TestResults
+        
+                  # Run tests in the container, writing JUnit XML into the mounted TestResults directory
+                  docker run --rm \
+                    -v $PWD/TestResults:/src/TestResults \
+                    ${env.TEST_IMAGE_TAG}
+                """
+        
+                // Publish JUnit test report so Jenkins shows a "Tests" tab/button
+                junit 'TestResults/*.xml'
             }
         }
 
