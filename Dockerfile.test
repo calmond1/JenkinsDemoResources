@@ -1,10 +1,24 @@
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS test
 WORKDIR /src
-# Change to your project folders and files
+
+# Copy project files first to optimize restore caching
 COPY ["MobileAPI.Test/MobileAPI.Test.csproj", "MobileAPI.Test/"]
 COPY ["MobileAPI/MobileAPI.csproj", "MobileAPI/"]
+
+# Restore test project (this pulls in both app + test deps)
 RUN dotnet restore "MobileAPI.Test/MobileAPI.Test.csproj"
+
+# Copy the rest of the source
 COPY . .
+
 WORKDIR "/src/MobileAPI.Test"
-# Run CLI for whatever platform your project is using
-RUN dotnet test
+
+# Do NOT run tests at build time – we’ll run them when the container runs
+# RUN dotnet test
+
+# When this container runs, execute tests and write JUnit XML into /src/TestResults
+ENTRYPOINT ["bash", "-c", "\
+  mkdir -p /src/TestResults && \
+  dotnet test MobileAPI.Test.csproj \
+    --logger \"junit;LogFilePath=/src/TestResults/test-results.xml\" \
+"]
