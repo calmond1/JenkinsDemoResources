@@ -63,7 +63,8 @@ pipeline {
                     -v \$PWD/TestResults:/src/TestResults \\
                     ${env.TEST_IMAGE_TAG}
                 """
-
+                
+                // Requires the junit plugin in Jenkins
                 junit 'TestResults/*.xml'
             }
         }
