@@ -153,6 +153,36 @@ pipeline {
             }
         }
 
+        stage('LLM Code Review') {
+            steps {
+                sh """
+                  git fetch origin main || true
+        
+                  git diff --name-only origin/main...HEAD \
+                    | egrep '\\.(cs|csproj|fs|vb)|Jenkinsfile|Dockerfile' \
+                    | grep -Ev '(^|/)Migrations/' \
+                    > changed_files.txt || true
+        
+                  if [ ! -s changed_files.txt ]; then
+                    echo "No relevant code changes; generating placeholder LLM review."
+                    echo "No changed files to review." > llm-review.md
+                    exit 0
+                  fi
+        
+                  python3 ci/llm_review.py changed_files.txt llm-review.md
+                """
+        
+                archiveArtifacts artifacts: 'llm-review.md', fingerprint: false
+        
+                script {
+                    def review = readFile('llm-review.md')
+                    if (review.contains('[SEVERITY: HIGH]')) {
+                        unstable "LLM Code Review reported high severity issues. See llm-review.md."
+                    }
+                }
+            }
+        }
+        
         // This requires a one-time setup in GH:
         // Go to your repo on GitHub → Settings → Pages
         // Under Source:
