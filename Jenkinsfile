@@ -13,7 +13,9 @@ pipeline {
         string(name: 'GIT_REPO', defaultValue: 'Your GH ssh url', description: 'Git repo URL')
         string(name: 'CREDENTIALS', defaultValue: 'YourJenkinsCredentialsIDHere', description: 'Jenkins Credentials ID')
         string(name: 'IMAGE_BASE', defaultValue: 'your-registry/aspnet-api', description: 'Base name for Docker images (repository/name)')
+        string(name: 'SONAR_HOST_URL', defaultValue: 'http://localhost:9000', description: 'SonarQube URL')
         string(name: 'SONAR_PROJECT_KEY', defaultValue: 'mobileapi', description: 'SonarQube Project Key (e.g., mobileapi)')
+        string(name: 'SONAR_TOKEN', defaultValue: '', description: 'SonarQube Project Token')
     }
 
     stages {
@@ -78,7 +80,7 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 // Name must match the SonarQube server configuration in Jenkins
-                withSonarQubeEnv('My SonarQube') {
+                withSonarQubeEnv('SonarQube') {
                     sh """
                         # Build sonar scan image using Dockerfile.sonar
                         docker build -t ${params.IMAGE_BASE}.sonarscan -f Dockerfile.sonar .
