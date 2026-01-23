@@ -1,0 +1,138 @@
+pipeline {
+    agent any
+
+    // Global environment (computed in the pipeline)
+    environment {
+        IMAGE_TAG = ""
+    }
+
+    // Jenkins parameters
+    parameters {
+        string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Branch to build')
+        string(name: 'GIT_REPO', defaultValue: 'git@github.com:WVUP/MobileAPI.git', description: 'Git repo SSH URL')
+        string(name: 'CREDENTIALS', defaultValue: 'ssh_key', description: 'Jenkins Credentials ID')
+        string(name: 'IMAGE_BASE', defaultValue: 'eandm', description: 'Base name for Docker images (repository/name)')
+        string(name: 'PROJECT_ROOT_DIR', defaultValue: './', description: 'Relative path to project root (Docker build context)')
+        string(name: 'TEST_PROJECT_PATH', defaultValue: './MobileAPI.Test/MobileAPI.Test.csproj', description: 'Relative path to test .csproj from project root (leave blank to auto-detect)')
+        string(name: 'DOCKERFILE_PATH', defaultValue: 'Dockerfile', description: 'Relative path to Dockerfile from project root')
+        string(name: 'COMPOSE_FILE', defaultValue: 'compose.yml', description: 'Compose file to use for deployment')
+    }
+
+    stages {
+        stage('Checkout Source') {
+            steps {
+                git branch: "${params.GIT_BRANCH}",
+                    url: "${params.GIT_REPO}",
+                    credentialsId: "${params.CREDENTIALS}"
+            }
+        }
+
+        stage('Determine Image Tag and Build Image') {
+          steps {
+            script {
+                // 1) Get short SHA of the current commit
+                def shortSha = sh(
+                    script: 'git rev-parse --short HEAD',
+                    returnStdout: true
+                ).trim()
+               
+                // 2) Get Jenkins build number (always defined in a normal job)
+                def buildNum = env.BUILD_NUMBER ?: '0'
+               
+                // 3) Construct image tag: repo:<sha>-<build>
+                //    e.g. mobileapi:abc1234-42
+                def imageTag = "${params.IMAGE_BASE}:${shortSha}-${buildNum}"
+               
+                // Make tag available later and persist to file
+                env.IMAGE_TAG = imageTag
+                writeFile file: 'imagetag', text: imageTag + '\n'
+               
+                echo "Using image tag: ${imageTag}"
+               
+                // Build the image using your existing API_ROOT/Dockerfile layout
+                def projectRoot = params.PROJECT_ROOT_DIR ?: './'
+                def dockerfileRel = params.DOCKERFILE_PATH ?: 'Dockerfile'
+               
+                sh "docker build -t ${imageTag} -f ${projectRoot}/${dockerfileRel} ${projectRoot}"
+            }
+          }
+        }
+
+		stage('Run Unit Tests') {
+		  steps {
+			script {
+			  def ws = env.WORKSPACE
+
+			  sh """
+				set -euo pipefail
+				rm -rf "${ws}/TestResults"
+				mkdir -p "${ws}/TestResults"
+
+				docker run --rm \\
+				  -v "/opt/jenkins/jenkins_home/workspace/${env.JOB_BASE_NAME}:/src" \\
+				  -w "/src" \\
+				  mcr.microsoft.com/dotnet/sdk:8.0 \\
+				  dotnet test "${params.TEST_PROJECT_PATH}" \\
+					--logger "junit;LogFileName=/src/TestResults/test-results.xml"
+			  """
+
+			  dir(ws) {
+				sh "ls -la TestResults && test -f TestResults/test-results.xml"
+				junit 'TestResults/*.xml'
+			  }
+			}
+		  }
+		}
+
+        stage('Deploy Stack') {
+		  steps {
+			script {
+			  def imageTag = fileExists('imagetag') ? readFile('imagetag').trim() : env.IMAGE_TAG
+			  def composeFile = params.COMPOSE_FILE ?: 'compose.yml'
+
+			  sh """
+				set -euo pipefail
+				echo "Deploying IMAGE_TAG=${imageTag} using ${composeFile}"
+
+				IMAGE_TAG='${imageTag}' docker compose -f '${composeFile}' up -d --force-recreate
+
+			  """
+			}
+		  }
+		}
+
+        stage('Cleanup Old Images') {
+            steps {
+                script {
+                    // Keep last 3 images, remove older ones
+                    sh """
+                    docker image ls --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" \\
+                    | grep '^${params.IMAGE_BASE}:' \\
+                    | sort -k2 -r \\
+                    | tail -n +4 \\
+                    | awk '{print \$1}' \\
+                    | xargs -r docker rmi
+                    """
+                   
+                    // Remove dangling images
+                    sh 'docker image prune -f'
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker ps || true'
+        }
+        success {
+            script {
+                def imageTag = fileExists('imagetag') ? readFile('imagetag').trim() : env.IMAGE_TAG
+                echo "✅ Build, tests, and deploy successful. New image tag: ${imageTag}"
+            }
+        }
+        failure {
+            echo "❌ Build or deployment failed."
+        }
+    }
+}
